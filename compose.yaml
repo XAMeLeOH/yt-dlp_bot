@@ -1,0 +1,18 @@
+name: ytdlp_bot
+
+services:
+  tgbotapi:
+    build: tgbotapi-server
+    command:
+      - /usr/local/bin/telegram-bot-api
+      - --api-id
+      - ${TGBOTAPISRV_API_ID:?set the var in .env}
+      - --api-hash
+      - ${TGBOTAPISRV_API_HASH:?set the var in .env}
+      - --local
+  tgbot:
+    build: tgbecho
+    command: ["python3", "/app/tgbot.py"]
+    environment:
+      TOKEN: ${TGBOT_TOKEN:?set the var in .env}
+
