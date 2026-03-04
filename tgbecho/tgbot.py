@@ -46,10 +46,7 @@ ydl_opts = {
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
-        reply_markup=ForceReply(selective=True),
-    )
+    await update.message.reply_html(rf"Hi {user.mention_html()}!")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,11 +57,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 def download(url: str) -> str:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        # logger.info(info["requested_downloads"][0])
         return info["requested_downloads"][0]["filepath"]
-
-def delete_file(url: str):
-    os.unlink(url)
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
@@ -73,11 +66,14 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     parsed = urlparse(update.message.text)
     if parsed.scheme and parsed.netloc:
         loop = asyncio.get_running_loop()
-        filename = await loop.run_in_executor(executor, download, update.message.text)
         try:
-            await update.message.reply_video(filename, read_timeout=300, write_timeout=300)
-        finally:
-            await loop.run_in_executor(executor, delete_file, filename)
+            filename = await loop.run_in_executor(executor, download, update.message.text)
+            try:
+                await update.message.reply_video(filename, read_timeout=300, write_timeout=300)
+            finally:
+                await loop.run_in_executor(executor, os.unlink, filename)
+        except Exception as e:
+            await update.message.reply_text("Unable to finalize the request")
     else:
         await update.message.reply_text(update.message.text)
 
