@@ -21,9 +21,16 @@ import logging
 import os
 import yt_dlp
 
+from yt_dlp.postprocessor.ffmpeg import FFmpegVideoConvertorPP
 from urllib.parse import urlparse
 from telegram import ForceReply, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+class MyConvertorPP(FFmpegVideoConvertorPP):
+    def get_param(self, name, default=None, *args, **kwargs):
+        if "postprocessor_args" == name:
+            return ["-crf", "26", "-c:v", "libx264"]
+        return super().get_param(name, default, *args, **kwargs)
 
 # Enable logging
 logging.basicConfig(
@@ -34,11 +41,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-executor = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 ydl_opts = {
     "noprogress": True,
-    "format": "bv*[filesize_approx<1900M]+ba/b[filesize_approx<2000M]"
+    "format": "bv*[filesize_approx<1800M]+ba/b[filesize<2000M]",
 }
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -56,8 +63,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def download(url: str) -> str:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.add_post_processor(MyConvertorPP(preferedformat="mp4"))
         info = ydl.extract_info(url, download=True)
-        return info["requested_downloads"][0]["filepath"]
+        return info
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
@@ -67,12 +75,19 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if parsed.scheme and parsed.netloc:
         loop = asyncio.get_running_loop()
         try:
-            filename = await loop.run_in_executor(executor, download, update.message.text)
+            fileinfo = await loop.run_in_executor(executor, download, update.message.text)
             try:
-                await update.message.reply_video(filename, read_timeout=300, write_timeout=300)
+                await update.message.reply_video(fileinfo["requested_downloads"][0]["filepath"],
+                    duration=fileinfo["duration"],
+                    width=fileinfo["requested_downloads"][0]["width"],
+                    height=fileinfo["requested_downloads"][0]["height"],
+                    cover=fileinfo["thumbnail"],
+                    caption=fileinfo["title"][:1024],
+                    read_timeout=300, write_timeout=300)
             finally:
-                await loop.run_in_executor(executor, os.unlink, filename)
+                await loop.run_in_executor(executor, os.unlink, fileinfo["requested_downloads"][0]["filepath"])
         except Exception as e:
+            logger.warning("Unable to finalize the request", e)
             await update.message.reply_text("Unable to finalize the request")
     else:
         await update.message.reply_text(update.message.text)
