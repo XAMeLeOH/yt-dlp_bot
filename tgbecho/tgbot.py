@@ -17,6 +17,7 @@ bot.
 
 import asyncio
 import concurrent.futures
+import itertools
 import logging
 import os
 import yt_dlp
@@ -48,6 +49,25 @@ ydl_opts = {
     "format": "bv*[filesize_approx<1800M]+ba/b[filesize<2000M]",
 }
 
+progress_list = [
+    chr(0x1F311),
+    chr(0x1F318),
+    chr(0x1F317),
+    chr(0x1F316),
+    chr(0x1F315),
+    chr(0x1F314),
+    chr(0x1F313),
+    chr(0x1F312),
+    chr(0x1F311),
+    chr(0x1F312),
+    chr(0x1F313),
+    chr(0x1F314),
+    chr(0x1F315),
+    chr(0x1F316),
+    chr(0x1F317),
+    chr(0x1F318),
+]
+
 # Define a few command handlers. These usually take the two arguments update and
 # context.
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,22 +80,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Send a message when the command /help is issued."""
     await update.message.reply_text("Help!")
 
+async def progress_co(msg):
+    try:
+        for p in itertools.cycle(progress_list):
+            msg = await msg.edit_text(f"Processing... {p}")
+            await asyncio.sleep(1)
+    finally:
+        await msg.delete()
+
 
 def download(url: str) -> str:
+    loop = asyncio.get_running_loop()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.add_post_processor(MyConvertorPP(preferedformat="mp4"))
-        info = ydl.extract_info(url, download=True)
-        return info
+        return loop.run_in_executor(executor, ydl.extract_info, url, True)
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
     logger.warning(update.message.chat)
-    # await update.message.reply_text(update.message.text)
     parsed = urlparse(update.message.text)
     if parsed.scheme and parsed.netloc:
         loop = asyncio.get_running_loop()
+        progress_msg = await update.message.reply_text("Processing...")
+        progress_task = asyncio.create_task(progress_co(progress_msg))
         try:
-            fileinfo = await loop.run_in_executor(executor, download, update.message.text)
+            fileinfo = await download(update.message.text)
             try:
                 await update.message.reply_video(fileinfo["requested_downloads"][0]["filepath"],
                     duration=fileinfo["duration"],
@@ -84,10 +113,12 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     cover=fileinfo["thumbnail"],
                     caption=fileinfo["title"][:1024],
                     read_timeout=300, write_timeout=300)
+                progress_task.cancel()
             finally:
                 await loop.run_in_executor(executor, os.unlink, fileinfo["requested_downloads"][0]["filepath"])
         except Exception as e:
             logger.warning("Unable to finalize the request", e)
+            progress_task.cancel()
             await update.message.reply_text("Unable to finalize the request")
     else:
         await update.message.reply_text(update.message.text)
@@ -99,6 +130,7 @@ def main() -> None:
     application = (Application.builder()
                               .base_url("http://tgbotapi:8081/bot")
                               .token(os.getenv("TOKEN"))
+                              .concurrent_updates(True)
                               .build())
 
     # on different commands - answer in Telegram
