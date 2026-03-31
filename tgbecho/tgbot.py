@@ -116,8 +116,8 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 progress_task.cancel()
             finally:
                 await loop.run_in_executor(executor, os.unlink, fileinfo["requested_downloads"][0]["filepath"])
-        except Exception as e:
-            logger.warning("Unable to finalize the request", e)
+        except Exception:
+            logger.warning("Unable to finalize the request", exc_info=True)
             progress_task.cancel()
             await update.message.reply_text("Unable to finalize the request")
     else:
